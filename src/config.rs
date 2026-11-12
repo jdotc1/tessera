@@ -147,18 +147,29 @@ impl TesseraConfig {
             || self
                 .include_paths
                 .iter()
-                .any(|prefix| rel_path.starts_with(prefix))
+                .any(|prefix| path_has_prefix(rel_path, prefix))
     }
 
     pub fn excludes_path(&self, rel_path: &str) -> bool {
         self.exclude_paths
             .iter()
-            .any(|prefix| rel_path.starts_with(prefix))
+            .any(|prefix| path_has_prefix(rel_path, prefix))
     }
 
     pub fn ignores_name(&self, name: &str) -> bool {
         self.ignore_names.iter().any(|ignored| ignored == name)
     }
+}
+
+/// A configured prefix selects the named path and its descendants, not a
+/// sibling whose first path component happens to share the same characters.
+fn path_has_prefix(rel_path: &str, prefix: &str) -> bool {
+    let prefix = prefix.trim_end_matches('/');
+    prefix.is_empty()
+        || rel_path == prefix
+        || rel_path
+            .strip_prefix(prefix)
+            .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
 fn apply_key_value(
@@ -223,6 +234,22 @@ fn normalize_prefixes(values: Vec<String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn include_and_exclude_prefixes_respect_path_component_boundaries() {
+        let config = TesseraConfig::parse_lossy(
+            "[include]\npaths = [\"src/api\"]\n[exclude]\npaths = [\"src/api/\"]\n",
+        );
+        for path in ["src/api", "src/api/routes.ts", "src/api/deep/route.ts"] {
+            assert!(config.includes_path(path), "include: {path}");
+            assert!(config.excludes_path(path), "exclude: {path}");
+        }
+        for path in ["src/api-client/x.ts", "src/apiUtils.ts", "src/apis/route.ts"] {
+            assert!(!config.includes_path(path), "include: {path}");
+            assert!(!config.excludes_path(path), "exclude: {path}");
+        }
+        assert!(TesseraConfig::default().includes_path("src/api-client/x.ts"));
+    }
 
     #[test]
     fn parses_include_exclude_and_extra_ignores() {
